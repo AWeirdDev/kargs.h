@@ -8,15 +8,21 @@
 #define KARGS_DEF
 #endif // KARGS_DEF
 
-#define KA_SUPPORTED_TYPES(X)                                                  \
+#ifndef KA_TYPE_MAP
+#define KA_TYPE_MAP(X)                                                         \
   X(int, int)                                                                  \
   X(string, char *)                                                            \
   X(boolean, bool)
+#endif // KA_TYPE_MAP
+
+#ifndef KA_ERROR_MAP
+#define KA_ERROR_MAP(X) X(MISSING_ARG, "missing argument: %s")
+#endif // KA_ERROR_MAP
 
 typedef enum {
 
 #define EXPAND(name, type) Ka_ArgType_##name,
-  KA_SUPPORTED_TYPES(EXPAND)
+  KA_TYPE_MAP(EXPAND)
 #undef EXPAND
 
 } Ka_ArgType;
@@ -195,8 +201,21 @@ typedef struct {
   }
 
 #define EXPAND(name, ctype) ka__arg_fn(name, ctype, Ka_ArgType_##name)
-KA_SUPPORTED_TYPES(EXPAND)
+KA_TYPE_MAP(EXPAND)
 #undef EXPAND
+
+// # Arg types
+//
+// For example:
+//
+// ```c
+// bool *help = ka_arg_boolean(
+//   &args,
+//   "-h --help",
+//   .optional = true,
+//   .description = "Displays a help message"
+// );
+// ```
 
 #define ka_arg_boolean(args, flag_names, ...)                                  \
   ka__arg_boolean(args, flag_names, (Ka_ArgOptions){__VA_ARGS__})

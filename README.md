@@ -18,7 +18,7 @@ int main(int argc, char **argv) {
   // It kind of acts like a context.
   Ka_Args args = {0};
 
-  int *help = ka_arg_int(&args,
+  int *number = ka_arg_int(&args,
                          "-n --number", // possible flags the user can pass
                          .description = "Count to a number", .optional = true);
 
