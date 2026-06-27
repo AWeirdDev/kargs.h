@@ -28,8 +28,9 @@ int main(int argc, char **argv) {
     int *number =
         ka_arg_int(&args, "-n --number", .description = "Count to a number",
                    .optional = false);
-    char **name = ka_arg_string(
-        &args, "--name", .description = "Your name", .optional = false);
+    char **name = 
+        ka_arg_string(&args, "--name", .description = "Your name", 
+                      .optional = false);
 
     // This serves as the entrypoint, it basically does all the job
     ka_args_entry(&args, argc, argv);
@@ -45,6 +46,14 @@ int main(int argc, char **argv) {
 ```
 
 Symbols are prefixed with `ka_` or `Ka_`.
+
+## Supported types
+
+- `int *ka_arg_int()` – Integer
+- `char **ka_arg_string()` – String
+- `bool *ka_arg_boolean()` – Boolean
+
+I'll add more types when I actually need it. Normally I don't.
 
 ## Acknowledgements
 
