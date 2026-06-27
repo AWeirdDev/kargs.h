@@ -1,3 +1,15 @@
+/*
+
+   KARGS - Single-header argument parser
+
+   version: 0.0.1
+   author: https://github.com/AWeirdDev
+   license: MIT
+
+   https://github.com/AWeirdDev/kargs
+
+ */
+
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>

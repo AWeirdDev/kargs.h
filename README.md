@@ -1,5 +1,9 @@
 # kargs.h
+
 A single-header command line argument parser written in C.
+
+It's inspired by the [flag](https://pkg.go.dev/flag) package in Go and [argparse](https://docs.python.org/3/library/argparse.html) in Python.
+It's relatively simple to work with, so feel free to put it in your simple workflows, if you just somehow love null pointers.
 
 Just get this shit:
 
