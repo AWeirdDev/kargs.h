@@ -16,8 +16,10 @@
 #ifndef KA_ERROR_MAP
 #define KA_ERROR_MAP(X)                                                        \
     X(OK, "", 0)                                                               \
-    X(UNKNOWN_FLAG, "unknown flag: %s\n", -1)                                  \
-    X(MISSING_ARG, "missing argument: %s\n", -2)
+    X(UNKNOWN_FLAG, "unknown flag: %s", -1)                                    \
+    X(MISSING_FLAG, "missing flag: %s", -2)                                    \
+    X(EXPECTED_VALUE, "expected value after flag: %s", -3)                     \
+    X(INVALID_INT, "invalid integer value for flag: %s", -4)
 #endif // KA_ERROR_MAP
 
 // enum ArgType;
@@ -112,6 +114,14 @@ static inline void ka_sv_push(Ka_StringView *view, char c) {
     ka__da_append(view, c);
 }
 
+/// Creates a string view from a CStr.
+static inline void ka_sv_push_cstr(Ka_StringView *view, const char *cstr) {
+    while (*cstr) {
+        ka_sv_push(view, *cstr);
+        cstr++;
+    }
+}
+
 /// Makes the string temporarily a CStr.
 /// Use `ka_sv_decstr()` later to turn it back to normal.
 static inline char *ka_sv_temp_cstr(Ka_StringView *view) {
@@ -122,20 +132,23 @@ static inline char *ka_sv_temp_cstr(Ka_StringView *view) {
 static inline void ka_sv_decstr(Ka_StringView *view) { view->length--; }
 
 /// Creates a string view from a CStr.
-static inline Ka_StringView ka_sv_from_cstr(char *cstr) {
+static inline Ka_StringView ka_sv_from_cstr(const char *cstr) {
     size_t len = strlen(cstr);
     Ka_StringView view = {0};
-    ka__da_reserve(&view, len);
 
-    for (size_t i = 0; i < len; i++) {
-        ka_sv_push(&view, cstr[i]);
-    }
+    ka__da_reserve(&view, len);
+    ka_sv_push_cstr(&view, cstr);
 
     return view;
 }
 
 // struct Arg;
 typedef struct {
+    bool filled;
+
+    Ka__ArgType type;
+    bool optional;
+    const char *names;
     const char *description;
 
     // we'll put the parsed result here when there's actually data
@@ -214,7 +227,7 @@ typedef struct {
 KARGS_DEF void ka_args_append(Ka_Args *args, Ka__Arg arg, Ka__FlagNames names) {
     // first append the flag names, which is for lookup
     for (size_t i = 0; i < names.length; i++) {
-        names.items[i].arg_idx = i;
+        names.items[i].arg_idx = args->args_info.length;
         ka_sv_temp_cstr(
             &names.items[i].name); // [^1] TEMPORARY CSTR OPERATED HERE
         ka__da_append(&args->flag_names, names.items[i]);
@@ -243,12 +256,16 @@ typedef struct {
 #define fn_body(args, ctype, type_tag, flag_names, options)                    \
     Ka__FlagNames flags = ka__parse_flag_names((flag_names));                  \
                                                                                \
-    void *slot = malloc(sizeof(ctype));                                        \
+    void *slot = calloc(1, sizeof(ctype));                                     \
     ka_assert_allocated(slot);                                                 \
                                                                                \
     ka_args_append(args,                                                       \
                    (Ka__Arg){                                                  \
+                       .names = flag_names,                                    \
                        .description = (options).description,                   \
+                       .optional = (options).optional,                         \
+                       .type = (type_tag),                                     \
+                       .filled = false,                                        \
                        .slot = slot,                                           \
                    },                                                          \
                    flags);                                                     \
@@ -314,31 +331,108 @@ static inline size_t ka__bsearch_args(Ka_Args *args, Ka_StringView target) {
     return result->arg_idx;
 }
 
+static inline Ka_StringView ka__get_usage(Ka__Arg *arg) {
+    Ka_StringView str = ka_sv_from_cstr(arg->names);
+
+    switch (arg->type) {
+#define EXPAND(name, _)                                                        \
+    case Ka__ArgType_##name:                                                   \
+        ka_sv_push_cstr(&str, " <" #name ">");                                 \
+        break;
+        KA_TYPE_MAP(EXPAND)
+#undef EXPAND
+
+    default:
+        ka_panic("unknown arg type");
+    }
+
+    return str;
+}
+
 typedef struct {
     Ka_Error error;
     Ka_StringView error_data;
 } Ka_Result;
 
+#define KA_RESULT_OK                                                           \
+    (Ka_Result) {}
+
+static inline Ka_Result ka__parse_and_apply_to_slot(Ka__Arg *arg, char *s) {
+    switch (arg->type) {
+    case Ka__ArgType_int:;
+        char *end;
+        long x = strtol(s, &end, 10);
+
+        if (*end == '\0') {
+            *(int *)arg->slot = (int)x;
+            return KA_RESULT_OK;
+        } else {
+            return (Ka_Result){.error = Ka_Error_INVALID_INT,
+                               ka__get_usage(arg)};
+        }
+
+    case Ka__ArgType_string:;
+        *(char **)arg->slot = s;
+        return KA_RESULT_OK;
+
+    case Ka__ArgType_boolean:;
+        *(bool *)arg->slot = (strcmp(s, "true")) == 0;
+        return KA_RESULT_OK;
+
+    default:
+        ka_panic("unknown arg type");
+    }
+}
+
 KARGS_DEF Ka_Result ka_args_parse(Ka_Args *args, int argc, char **argv) {
     ka__qsort_args(args);
+    Ka__Arg *current = NULL;
 
     for (int i = 0; i < argc; i++) {
         // first, we treat it as a possible flag
         Ka_StringView maybe_flag = ka_sv_from_cstr(argv[i]);
 
-        size_t maybe_arg = ka__bsearch_args(args, maybe_flag);
+        if (current != NULL) {
+            Ka_Result result = ka__parse_and_apply_to_slot(
+                current, ka_sv_temp_cstr(&maybe_flag));
 
-        if (maybe_arg == SIZE_MAX) {
+            if (result.error)
+                return result;
+
+            current->filled = true;
+            current = NULL;
+            continue;
+        }
+
+        size_t maybe_arg_idx = ka__bsearch_args(args, maybe_flag);
+
+        if (maybe_arg_idx == SIZE_MAX) {
             return (Ka_Result){.error = Ka_Error_UNKNOWN_FLAG,
                                .error_data = maybe_flag};
         }
 
-        void *slot = args->args_info.items[maybe_arg].slot;
-
-        *(int *)slot = 69;
+        current = &args->args_info.items[maybe_arg_idx];
+        if (current->type == Ka__ArgType_boolean) {
+            *(bool *)current->slot = true;
+            current->filled = true;
+        }
     }
 
-    return (Ka_Result){.error = Ka_Error_OK};
+    // if there are any leftover stuff, tell the user about it
+    if (current != NULL) {
+        return (Ka_Result){.error = Ka_Error_EXPECTED_VALUE,
+                           .error_data = ka__get_usage(current)};
+    }
+
+    for (size_t i = 0; i < args->args_info.length; i++) {
+        Ka__Arg *arg = &args->args_info.items[i];
+        if (!arg->optional && !arg->filled) {
+            return (Ka_Result){.error = Ka_Error_MISSING_FLAG,
+                               .error_data = ka_sv_from_cstr(arg->names)};
+        }
+    }
+
+    return KA_RESULT_OK;
 }
 
 const char *ka_get_error_message(Ka_Error error) {
@@ -349,6 +443,9 @@ const char *ka_get_error_message(Ka_Error error) {
 
         KA_ERROR_MAP(EXPAND)
 #undef EXPAND
+
+    default:
+        return "";
     }
 }
 
@@ -356,6 +453,7 @@ const char *ka_get_error_message(Ka_Error error) {
 KARGS_DEF void ka_print_error(Ka_Result result) {
     fprintf(stderr, ka_get_error_message(result.error),
             ka_sv_temp_cstr(&result.error_data));
+    fprintf(stderr, "\n");
     ka__da_free(&result.error_data);
 }
 
