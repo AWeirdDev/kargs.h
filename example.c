@@ -1,4 +1,5 @@
 #include <stdio.h>
+
 #define KARGS_IMPLEMENTATION
 #include "kargs.h"
 
