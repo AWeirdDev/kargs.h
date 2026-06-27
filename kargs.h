@@ -156,6 +156,19 @@ KA_TYPE_MAP(EXPAND)
 #undef arg_fn
 #undef fn_body
 
+// # Arg types
+//
+// For example:
+//
+// ```c
+// bool *help = ka_arg_boolean(
+//   &args,
+//   "-h --help",
+//   .optional = true,
+//   .description = "Displays a help message"
+// );
+// ```
+
 #define ka_arg_boolean(args, flag_names, ...)                                  \
     ka__arg_boolean(args, flag_names, (Ka_ArgOptions){__VA_ARGS__})
 
@@ -359,19 +372,6 @@ KA_TYPE_MAP(EXPAND)
 #define ka_arg_int(args, flag_names, ...)                                      \
     ka__arg_int(args, flag_names, (Ka_ArgOptions){__VA_ARGS__})
 
-// # Arg types
-//
-// For example:
-//
-// ```c
-// bool *help = ka_arg_boolean(
-//   &args,
-//   "-h --help",
-//   .optional = true,
-//   .description = "Displays a help message"
-// );
-// ```
-
 static int ka__cmp(const void *a, const void *b) {
     const Ka_FlagName *flag_a = a, *flag_b = b;
 
@@ -543,4 +543,4 @@ KARGS_DEF void ka_args_entry(Ka_Args *args, int argc, char **argv) {
     }
 }
 
-#endif
+#endif // KARGS_IMPLEMENTATION
