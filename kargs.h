@@ -1,5 +1,8 @@
 #include <stdbool.h>
+
+#ifndef KARGS_ALLOC
 #include <stdlib.h>
+#endif // KARGS_ALLOC
 
 #ifndef KARGS_DEF
 #define KARGS_DEF
@@ -182,13 +185,13 @@ typedef struct {
                        });                                                     \
   return slot;
 
-#define ka__arg_fn(name, type, type_tag)                                       \
-  KARGS_DEF type *ka__arg_##name(Ka_Args *args, const char *flag_names,        \
-                                 Ka_ArgOptions options) {                      \
-    ka__arg_fn_body(args, type, type_tag, flag_names, options)                 \
+#define ka__arg_fn(name, ctype, type_tag)                                      \
+  KARGS_DEF ctype *ka__arg_##name(Ka_Args *args, const char *flag_names,       \
+                                  Ka_ArgOptions options) {                     \
+    ka__arg_fn_body(args, ctype, type_tag, flag_names, options)                \
   }
 
-#define EXPAND(name, type) ka__arg_fn(name, type, Ka_ArgType_##name)
+#define EXPAND(name, ctype) ka__arg_fn(name, ctype, Ka_ArgType_##name)
 KA_SUPPORTED_TYPES(EXPAND)
 #undef EXPAND
 
