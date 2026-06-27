@@ -1,14 +1,15 @@
-#include <stdio.h>
-
 #define KARGS_IMPLEMENTATION
 #include "kargs.h"
 
-int main() {
+int main(int argc, char **argv) {
+  // Zero initialize the args container.
+  // It kind of acts like a context.
   Ka_Args args = {0};
-  ka_arg_int(&args, "--hello");
-  ka_arg_string(&args, "--sus", .optional = false);
 
-  printf("desc = %s", args.items->description);
+  int *help = ka_arg_int(&args,
+                         "-n --number", // possible flags the user can pass
+                         .description = "Count to a number", .optional = true);
 
+  // If you don't trust your OS, free this shit.
   ka_args_free(args);
 }

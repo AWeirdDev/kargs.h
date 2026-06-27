@@ -33,11 +33,15 @@ typedef enum {
 // Specifies the behavior when kargs panics.
 // You can define this macro yourself so it does something else
 // other than this.
+#ifndef ka_panic
+#include <stdio.h>
+
 #define ka_panic(reason)                                                       \
   do {                                                                         \
     fprintf(stderr, "kargs panicked: %s\n", reason);                           \
     exit(1);                                                                   \
   } while (0)
+#endif // ka_panic
 
 // Specifies the behavior when asserting whether the allocation
 // had failed. This just detects null pointers. Stoopid ahh
@@ -156,8 +160,7 @@ KARGS_DEF void ka_args_append(Ka_Args *args, Ka_Arg arg) {
   ka__da_append(args, arg);
 }
 
-/// Frees the arg parser (`Ka_Args`) and all the dynamic arrays
-/// within.
+/// Frees the arg parser (`Ka_Args`) and all the dynamic arrays within.
 KARGS_DEF void ka_args_free(Ka_Args args) {
   for (size_t i = 0; i < args.length; i++) {
     free(args.items[i].slot);
