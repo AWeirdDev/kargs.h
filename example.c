@@ -8,19 +8,17 @@ int main(int argc, char **argv) {
     Ka_Args args = {0};
 
     int *number =
-        ka_arg_int(&args,
-                   "-n --number", // possible flags the user can pass
-                   .description = "Count to a number", .optional = true);
+        ka_arg_int(&args, "-n --number", .description = "Count to a number",
+                   .optional = false);
 
-    ka__qsort_args(&args);
+    char **name = ka_arg_string(
+        &args, "--name", .description = "The name of you", .optional = false);
 
-    Ka_Result result = ka_args_parse(&args, argc - 1, argv + 1);
-    if (result.error) {
-        ka_print_error(result);
-        return 1;
+    ka_args_entry(&args, argc, argv);
+
+    for (int i = 0; i < *number; i++) {
+        printf("%s\n", *name);
     }
-
-    printf("%d", *number);
 
     // If you don't trust your OS, free this shit.
     ka_args_free(args);

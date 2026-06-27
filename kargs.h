@@ -1,10 +1,29 @@
 #include <stdbool.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #ifndef KARGS_DEF
 #define KARGS_DEF
 #endif // KARGS_DEF
+
+// Specifies the behavior when kargs panics.
+// You can define this macro yourself so it does something else
+// other than this.
+#ifndef ka_panic
+#define ka_panic(reason)                                                       \
+    do {                                                                       \
+        fprintf(stderr, "kargs panicked: %s\n", reason);                       \
+        exit(1);                                                               \
+    } while (0)
+#endif // ka_panic
+
+// Specifies the behavior when asserting whether the allocation
+// had failed. This just detects null pointers. Stoopid ahh
+#define ka_assert_allocated(ptr)                                               \
+    if ((ptr) == NULL) {                                                       \
+        ka_panic("allocation failed");                                         \
+    }
 
 #ifndef KA_TYPE_MAP
 #define KA_TYPE_MAP(X)                                                         \
@@ -25,11 +44,11 @@
 // enum ArgType;
 typedef enum {
 
-#define EXPAND(name, type) Ka__ArgType_##name,
+#define EXPAND(name, type) Ka_ArgType_##name,
     KA_TYPE_MAP(EXPAND)
 #undef EXPAND
 
-} Ka__ArgType;
+} Ka_ArgType;
 
 // enum Error;
 typedef enum {
@@ -40,40 +59,120 @@ typedef enum {
 
 } Ka_Error;
 
-/*
- * impl kargs
- */
-#ifdef KARGS_IMPLEMENTATION
-
-/*
- * utilities
- */
-
-// Specifies the behavior when kargs panics.
-// You can define this macro yourself so it does something else
-// other than this.
-#ifndef ka_panic
-#include <stdio.h>
-
-#define ka_panic(reason)                                                       \
-    do {                                                                       \
-        fprintf(stderr, "kargs panicked: %s\n", reason);                       \
-        exit(1);                                                               \
-    } while (0)
-#endif // ka_panic
-
-// Specifies the behavior when asserting whether the allocation
-// had failed. This just detects null pointers. Stoopid ahh
-#define ka_assert_allocated(ptr)                                               \
-    if ((ptr) == NULL) {                                                       \
-        ka_panic("allocation failed");                                         \
-    }
-
 // Required fields for dynamic arrays
 #define KA__DA_FIELDS(type)                                                    \
     size_t length;                                                             \
     size_t capacity;                                                           \
     type *items;
+
+typedef struct {
+    KA__DA_FIELDS(char)
+} Ka_StringView;
+
+KARGS_DEF Ka_StringView ka_sv_from_cstr(const char *cstr);
+
+/// Gets the length of the string view.
+KARGS_DEF size_t ka_sv_len(Ka_StringView *view);
+
+/// Pushes a char to the string view.
+KARGS_DEF void ka_sv_push(Ka_StringView *view, char c);
+
+/// Pushes a CStr to the string view.
+KARGS_DEF void ka_sv_push_cstr(Ka_StringView *view, const char *cstr);
+
+/// Makes the string temporarily a CStr.
+/// Use `ka_sv_decstr()` later to turn it back to normal.
+KARGS_DEF char *ka_sv_temp_cstr(Ka_StringView *view);
+
+KARGS_DEF void ka_sv_decstr(Ka_StringView *view);
+
+// struct Arg;
+typedef struct {
+    bool filled;
+
+    Ka_ArgType type;
+    bool optional;
+    const char *names;
+    const char *description;
+
+    // we'll put the parsed result here when there's actually data
+    void *slot;
+} Ka_Arg;
+
+typedef struct {
+    KA__DA_FIELDS(Ka_Arg)
+} Ka_ArgsInfoContainer;
+
+// struct FlagName;
+typedef struct {
+    Ka_StringView name;
+    size_t arg_idx;
+} Ka_FlagName;
+
+typedef struct {
+    KA__DA_FIELDS(Ka_FlagName)
+} Ka_FlagNames;
+
+// struct Args;
+typedef struct {
+    Ka_ArgsInfoContainer args_info;
+    Ka_FlagNames flag_names;
+} Ka_Args;
+
+KARGS_DEF Ka_FlagNames ka_parse_flag_names(const char *s);
+
+/// Append an argument to `Args`.
+KARGS_DEF void ka_args_append(Ka_Args *args, Ka_Arg arg, Ka_FlagNames names);
+
+/// Frees the arg parser (`Ka_Args`) and all the dynamic arrays within.
+KARGS_DEF void ka_args_free(Ka_Args args);
+
+typedef struct {
+    bool optional;
+    char *description;
+} Ka_ArgOptions;
+
+#define arg_fn(name, ctype, type_tag)                                          \
+    KARGS_DEF ctype *ka__arg_##name(Ka_Args *args, const char *flag_names,     \
+                                    Ka_ArgOptions options);
+
+#define EXPAND(name, ctype) arg_fn(name, ctype, Ka_ArgType_##name)
+
+KA_TYPE_MAP(EXPAND)
+
+#undef EXPAND
+#undef arg_fn
+#undef fn_body
+
+#define ka_arg_boolean(args, flag_names, ...)                                  \
+    ka__arg_boolean(args, flag_names, (Ka_ArgOptions){__VA_ARGS__})
+
+#define ka_arg_string(args, flag_names, ...)                                   \
+    ka__arg_string(args, flag_names, (Ka_ArgOptions){__VA_ARGS__})
+
+#define ka_arg_int(args, flag_names, ...)                                      \
+    ka__arg_int(args, flag_names, (Ka_ArgOptions){__VA_ARGS__})
+
+typedef struct {
+    Ka_Error error;
+    Ka_StringView error_data;
+} Ka_Result;
+
+KARGS_DEF const char *ka_get_error_message(Ka_Error error);
+KARGS_DEF void ka_print_error(Ka_Result result);
+
+KARGS_DEF Ka_Result ka_args_parse(Ka_Args *args, int argc, char **argv);
+
+KARGS_DEF void ka_print_help(Ka_Args *args);
+
+/// Invokes the entrypoint. This function returns nothing when it passes,
+/// and exits the program & print help on error.
+KARGS_DEF void ka_args_entry(Ka_Args *args, int argc, char **argv);
+
+/*
+ * === KArgs implementation ===
+ */
+#ifdef KARGS_IMPLEMENTATION
 
 #define ka__da_reserve(da, expected_capacity)                                  \
     do {                                                                       \
@@ -102,37 +201,31 @@ typedef enum {
         (da)->items[(da)->length++] = (item);                                  \
     } while (0)
 
-typedef struct {
-    KA__DA_FIELDS(char)
-} Ka_StringView;
-
 /// Gets the length of the string view.
-static inline size_t ka_sv_len(Ka_StringView *view) { return view->length; }
+KARGS_DEF size_t ka_sv_len(Ka_StringView *view) { return view->length; }
 
 /// Pushes a character onto the string view.
-static inline void ka_sv_push(Ka_StringView *view, char c) {
+KARGS_DEF void ka_sv_push(Ka_StringView *view, char c) {
     ka__da_append(view, c);
 }
 
 /// Creates a string view from a CStr.
-static inline void ka_sv_push_cstr(Ka_StringView *view, const char *cstr) {
+KARGS_DEF void ka_sv_push_cstr(Ka_StringView *view, const char *cstr) {
     while (*cstr) {
         ka_sv_push(view, *cstr);
         cstr++;
     }
 }
 
-/// Makes the string temporarily a CStr.
-/// Use `ka_sv_decstr()` later to turn it back to normal.
-static inline char *ka_sv_temp_cstr(Ka_StringView *view) {
+KARGS_DEF char *ka_sv_temp_cstr(Ka_StringView *view) {
     ka_sv_push(view, '\0');
     return view->items;
 }
 
-static inline void ka_sv_decstr(Ka_StringView *view) { view->length--; }
+KARGS_DEF void ka_sv_decstr(Ka_StringView *view) { view->length--; }
 
 /// Creates a string view from a CStr.
-static inline Ka_StringView ka_sv_from_cstr(const char *cstr) {
+KARGS_DEF Ka_StringView ka_sv_from_cstr(const char *cstr) {
     size_t len = strlen(cstr);
     Ka_StringView view = {0};
 
@@ -141,23 +234,6 @@ static inline Ka_StringView ka_sv_from_cstr(const char *cstr) {
 
     return view;
 }
-
-// struct Arg;
-typedef struct {
-    bool filled;
-
-    Ka__ArgType type;
-    bool optional;
-    const char *names;
-    const char *description;
-
-    // we'll put the parsed result here when there's actually data
-    void *slot;
-} Ka__Arg;
-
-typedef struct {
-    KA__DA_FIELDS(Ka__Arg)
-} Ka__ArgsInfoContainer;
 
 typedef struct {
     Ka_StringView str;
@@ -194,37 +270,21 @@ static Ka__FlagParseResult ka__parse_flag_name(const char *s) {
     return (Ka__FlagParseResult){.str = collector, .next = s};
 }
 
-// struct FlagName;
-typedef struct {
-    Ka_StringView name;
-    size_t arg_idx;
-} Ka__FlagName;
-
-typedef struct {
-    KA__DA_FIELDS(Ka__FlagName)
-} Ka__FlagNames;
-
-static Ka__FlagNames ka__parse_flag_names(const char *s) {
-    Ka__FlagNames parsed = {0};
+KARGS_DEF Ka_FlagNames ka_parse_flag_names(const char *s) {
+    Ka_FlagNames parsed = {0};
 
     while (*s) {
         Ka__FlagParseResult result = ka__parse_flag_name(s);
         s = result.next;
 
         ka__da_append(&parsed,
-                      ((Ka__FlagName){.name = result.str, .arg_idx = 0}));
+                      ((Ka_FlagName){.name = result.str, .arg_idx = 0}));
     }
 
     return parsed;
 }
 
-// struct Args;
-typedef struct {
-    Ka__ArgsInfoContainer args_info;
-    Ka__FlagNames flag_names;
-} Ka_Args;
-
-KARGS_DEF void ka_args_append(Ka_Args *args, Ka__Arg arg, Ka__FlagNames names) {
+KARGS_DEF void ka_args_append(Ka_Args *args, Ka_Arg arg, Ka_FlagNames names) {
     // first append the flag names, which is for lookup
     for (size_t i = 0; i < names.length; i++) {
         names.items[i].arg_idx = args->args_info.length;
@@ -238,7 +298,6 @@ KARGS_DEF void ka_args_append(Ka_Args *args, Ka__Arg arg, Ka__FlagNames names) {
     ka__da_append(&args->args_info, arg);
 }
 
-/// Frees the arg parser (`Ka_Args`) and all the dynamic arrays within.
 KARGS_DEF void ka_args_free(Ka_Args args) {
     for (size_t i = 0; i < args.args_info.length; i++) {
         free(args.args_info.items[i].slot);
@@ -248,19 +307,14 @@ KARGS_DEF void ka_args_free(Ka_Args args) {
     ka__da_free(&args.flag_names);
 }
 
-typedef struct {
-    bool optional;
-    char *description;
-} Ka__ArgOptions;
-
 #define fn_body(args, ctype, type_tag, flag_names, options)                    \
-    Ka__FlagNames flags = ka__parse_flag_names((flag_names));                  \
+    Ka_FlagNames flags = ka_parse_flag_names((flag_names));                    \
                                                                                \
     void *slot = calloc(1, sizeof(ctype));                                     \
     ka_assert_allocated(slot);                                                 \
                                                                                \
     ka_args_append(args,                                                       \
-                   (Ka__Arg){                                                  \
+                   (Ka_Arg){                                                   \
                        .names = flag_names,                                    \
                        .description = (options).description,                   \
                        .optional = (options).optional,                         \
@@ -269,20 +323,29 @@ typedef struct {
                        .slot = slot,                                           \
                    },                                                          \
                    flags);                                                     \
-    return slot;
+    return (ctype *)slot;
 #define arg_fn(name, ctype, type_tag)                                          \
     KARGS_DEF ctype *ka__arg_##name(Ka_Args *args, const char *flag_names,     \
-                                    Ka__ArgOptions options) {                  \
+                                    Ka_ArgOptions options) {                   \
         fn_body(args, ctype, type_tag, flag_names, options)                    \
     }
 
-#define EXPAND(name, ctype) arg_fn(name, ctype, Ka__ArgType_##name)
+#define EXPAND(name, ctype) arg_fn(name, ctype, Ka_ArgType_##name)
 
 KA_TYPE_MAP(EXPAND)
 
 #undef EXPAND
 #undef arg_fn
 #undef fn_body
+
+#define ka_arg_boolean(args, flag_names, ...)                                  \
+    ka__arg_boolean(args, flag_names, (Ka_ArgOptions){__VA_ARGS__})
+
+#define ka_arg_string(args, flag_names, ...)                                   \
+    ka__arg_string(args, flag_names, (Ka_ArgOptions){__VA_ARGS__})
+
+#define ka_arg_int(args, flag_names, ...)                                      \
+    ka__arg_int(args, flag_names, (Ka_ArgOptions){__VA_ARGS__})
 
 // # Arg types
 //
@@ -297,32 +360,23 @@ KA_TYPE_MAP(EXPAND)
 // );
 // ```
 
-#define ka_arg_boolean(args, flag_names, ...)                                  \
-    ka__arg_boolean(args, flag_names, (Ka__ArgOptions){__VA_ARGS__})
-
-#define ka_arg_string(args, flag_names, ...)                                   \
-    ka__arg_string(args, flag_names, (Ka__ArgOptions){__VA_ARGS__})
-
-#define ka_arg_int(args, flag_names, ...)                                      \
-    ka__arg_int(args, flag_names, (Ka__ArgOptions){__VA_ARGS__})
-
 static int ka__cmp(const void *a, const void *b) {
-    const Ka__FlagName *flag_a = a, *flag_b = b;
+    const Ka_FlagName *flag_a = a, *flag_b = b;
 
     // NOTE: temporarily converted to a cstring already (see [^1])
     return strcmp(flag_a->name.items, flag_b->name.items);
 }
 
 static inline void ka__qsort_args(Ka_Args *args) {
-    qsort(args->flag_names.items, args->flag_names.length, sizeof(Ka__FlagName),
+    qsort(args->flag_names.items, args->flag_names.length, sizeof(Ka_FlagName),
           ka__cmp);
 }
 
 static inline size_t ka__bsearch_args(Ka_Args *args, Ka_StringView target) {
-    Ka__FlagName key = {.name = target, .arg_idx = 0};
-    Ka__FlagName *result =
+    Ka_FlagName key = {.name = target, .arg_idx = 0};
+    Ka_FlagName *result =
         bsearch(&key, args->flag_names.items, args->flag_names.length,
-                sizeof(Ka__FlagName), ka__cmp);
+                sizeof(Ka_FlagName), ka__cmp);
 
     if (!result) {
         return SIZE_MAX;
@@ -331,12 +385,12 @@ static inline size_t ka__bsearch_args(Ka_Args *args, Ka_StringView target) {
     return result->arg_idx;
 }
 
-static inline Ka_StringView ka__get_usage(Ka__Arg *arg) {
+static inline Ka_StringView ka__get_usage(Ka_Arg *arg) {
     Ka_StringView str = ka_sv_from_cstr(arg->names);
 
     switch (arg->type) {
 #define EXPAND(name, _)                                                        \
-    case Ka__ArgType_##name:                                                   \
+    case Ka_ArgType_##name:                                                    \
         ka_sv_push_cstr(&str, " <" #name ">");                                 \
         break;
         KA_TYPE_MAP(EXPAND)
@@ -349,17 +403,12 @@ static inline Ka_StringView ka__get_usage(Ka__Arg *arg) {
     return str;
 }
 
-typedef struct {
-    Ka_Error error;
-    Ka_StringView error_data;
-} Ka_Result;
-
 #define KA_RESULT_OK                                                           \
     (Ka_Result) {}
 
-static inline Ka_Result ka__parse_and_apply_to_slot(Ka__Arg *arg, char *s) {
+static inline Ka_Result ka__parse_and_apply_to_slot(Ka_Arg *arg, char *s) {
     switch (arg->type) {
-    case Ka__ArgType_int:;
+    case Ka_ArgType_int:;
         char *end;
         long x = strtol(s, &end, 10);
 
@@ -371,11 +420,11 @@ static inline Ka_Result ka__parse_and_apply_to_slot(Ka__Arg *arg, char *s) {
                                ka__get_usage(arg)};
         }
 
-    case Ka__ArgType_string:;
+    case Ka_ArgType_string:;
         *(char **)arg->slot = s;
         return KA_RESULT_OK;
 
-    case Ka__ArgType_boolean:;
+    case Ka_ArgType_boolean:;
         *(bool *)arg->slot = (strcmp(s, "true")) == 0;
         return KA_RESULT_OK;
 
@@ -386,7 +435,7 @@ static inline Ka_Result ka__parse_and_apply_to_slot(Ka__Arg *arg, char *s) {
 
 KARGS_DEF Ka_Result ka_args_parse(Ka_Args *args, int argc, char **argv) {
     ka__qsort_args(args);
-    Ka__Arg *current = NULL;
+    Ka_Arg *current = NULL;
 
     for (int i = 0; i < argc; i++) {
         // first, we treat it as a possible flag
@@ -412,20 +461,20 @@ KARGS_DEF Ka_Result ka_args_parse(Ka_Args *args, int argc, char **argv) {
         }
 
         current = &args->args_info.items[maybe_arg_idx];
-        if (current->type == Ka__ArgType_boolean) {
+        if (current->type == Ka_ArgType_boolean) {
             *(bool *)current->slot = true;
             current->filled = true;
         }
     }
 
     // if there are any leftover stuff, tell the user about it
-    if (current != NULL) {
+    if (current != NULL && !current->filled) {
         return (Ka_Result){.error = Ka_Error_EXPECTED_VALUE,
                            .error_data = ka__get_usage(current)};
     }
 
     for (size_t i = 0; i < args->args_info.length; i++) {
-        Ka__Arg *arg = &args->args_info.items[i];
+        Ka_Arg *arg = &args->args_info.items[i];
         if (!arg->optional && !arg->filled) {
             return (Ka_Result){.error = Ka_Error_MISSING_FLAG,
                                .error_data = ka_sv_from_cstr(arg->names)};
@@ -435,7 +484,7 @@ KARGS_DEF Ka_Result ka_args_parse(Ka_Args *args, int argc, char **argv) {
     return KA_RESULT_OK;
 }
 
-const char *ka_get_error_message(Ka_Error error) {
+KARGS_DEF const char *ka_get_error_message(Ka_Error error) {
     switch (error) {
 #define EXPAND(name, msg, _)                                                   \
     case Ka_Error_##name:                                                      \
@@ -457,4 +506,29 @@ KARGS_DEF void ka_print_error(Ka_Result result) {
     ka__da_free(&result.error_data);
 }
 
-#endif // KARGS_IMPLEMENTATION
+KARGS_DEF void ka_print_help(Ka_Args *args) {
+    // find longest name lol
+    size_t max_len = 0;
+    for (size_t i = 0; i < args->args_info.length; i++) {
+        size_t len = strlen(args->args_info.items[i].names);
+        if (len > max_len)
+            max_len = len;
+    }
+
+    fprintf(stdout, "Arguments:\n");
+    for (size_t i = 0; i < args->args_info.length; i++) {
+        Ka_Arg *arg = &args->args_info.items[i];
+        fprintf(stdout, "  %-*s    %s\n", (int)max_len, arg->names,
+                arg->description);
+    }
+}
+
+KARGS_DEF void ka_args_entry(Ka_Args *args, int argc, char **argv) {
+    Ka_Result result = ka_args_parse(args, argc - 1, argv + 1);
+    if (result.error) {
+        ka_print_error(result);
+        exit(1);
+    }
+}
+
+#endif
