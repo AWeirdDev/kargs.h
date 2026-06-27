@@ -6,7 +6,7 @@
    author: https://github.com/AWeirdDev
    license: MIT
 
-   https://github.com/AWeirdDev/kargs
+   https://github.com/AWeirdDev/kargs.h
 
  */
 
