@@ -19,6 +19,9 @@
 #define KARGS_DEF
 #endif // KARGS_DEF
 
+#ifndef KARGS_H_
+#define KARGS_H_
+
 // Specifies the behavior when kargs panics.
 // You can define this macro yourself so it does something else
 // other than this.
@@ -193,6 +196,8 @@ KARGS_DEF void ka_print_help(Ka_Args *args);
 /// Invokes the entrypoint. This function returns nothing when it passes,
 /// and exits the program & print help on error.
 KARGS_DEF void ka_args_entry(Ka_Args *args, int argc, char **argv);
+
+#endif // KARGS_H_
 
 /*
  * === KArgs implementation ===
