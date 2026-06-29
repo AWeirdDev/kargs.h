@@ -8,7 +8,7 @@
 
    https://github.com/AWeirdDev/kargs.h
 
- */
+*/
 
 #include <stdbool.h>
 #include <stdio.h>
